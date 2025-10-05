@@ -1,0 +1,28 @@
+# Core NLP
+transformers>=4.43.0
+accelerate>=0.33.0
+sentencepiece>=0.2.0
+protobuf>=4.25.0
+
+# Datasets (optional for experimentation)
+datasets>=2.20.0
+
+# Inference backends
+torch>=2.2.0
+
+# UI
+streamlit>=1.36.0
+emoji>=2.12.1
+
+# Speech
+openai-whisper>=20231117
+# Replacing Coqui TTS with pyttsx3 for Python 3.13/Windows compatibility
+pyttsx3>=2.90
+soundfile>=0.12.1
+pydub>=0.25.1
+
+# Audio utils
+ffmpeg-python>=0.2.0
+
+# Misc
+numpy>=1.26.0
