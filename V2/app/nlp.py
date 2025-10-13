@@ -1,16 +1,19 @@
 import torch
 import re
 import random
+import json
+import datetime
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from typing import Dict, List, Tuple
+import os
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-class NLP:
+class CompanionNLP:
     def __init__(self):
-        print(f"Loading enhanced empathetic models on {DEVICE}...")
+        print(f"Loading advanced companion AI on {DEVICE}...")
         
-        # More accurate emotion detection model
+        # Emotion detection
         self.sentiment = pipeline(
             "text-classification",
             model="j-hartmann/emotion-english-distilroberta-base",
@@ -18,76 +21,80 @@ class NLP:
             top_k=None
         )
         
-        # Use a more capable model for empathetic responses
-        print("Loading empathetic dialogue model...")
-        model_name = "microsoft/DialoGPT-medium"
-        self.dialogue_tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.dialogue_model = AutoModelForCausalLM.from_pretrained(model_name).to(DEVICE)
-        self.dialogue_model.eval()
+        # Use a more conversational model - Mistral is great for natural dialogue
+        print("Loading conversational companion model...")
+        model_name = "mistralai/Mistral-7B-Instruct-v0.2"  # Much more natural conversations
+        # Fallback to smaller model if needed:
+        # model_name = "microsoft/DialoGPT-medium"
         
-        if self.dialogue_tokenizer.pad_token is None:
-            self.dialogue_tokenizer.pad_token = self.dialogue_tokenizer.eos_token
-
-        # Comprehensive empathetic response templates
-        self.emotion_guided_responses = {
-            'joy': [
-                "I can feel your happiness shining through! 😊 It's wonderful to hear you're experiencing joy. What specifically is bringing you this positive energy?",
-                "That's absolutely fantastic! Celebrating these joyful moments is so important for our wellbeing. I'd love to hear more about what's making you feel this way!",
-                "Your happiness is truly uplifting! Thanks for sharing this beautiful moment. Could you tell me more about what's behind these wonderful feelings?"
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
+            device_map="auto" if DEVICE == "cuda" else None,
+            low_cpu_mem_usage=True
+        )
+        self.model.eval()
+        
+        # Ensure proper tokenizer setup
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer.padding_side = "left"
+        
+        # Conversation memory
+        self.conversation_history = []
+        self.user_profile = {}
+        self.max_history = 8  # Keep last 8 exchanges
+        
+        # Companion personality traits
+        self.companion_traits = {
+            "name": "Alex",
+            "style": "warm, curious, deeply empathetic",
+            "memories": [],
+            "topics_discussed": set()
+        }
+        
+        # Enhanced response templates for natural conversation
+        self.natural_follow_ups = {
+            'project_struggles': [
+                "How long have you been working on this project?",
+                "What part of the project feels most challenging right now?",
+                "I remember you mentioned this project before - has anything changed since we last talked?",
+                "What would make this project feel more manageable for you?"
             ],
-            'sadness': [
-                "I hear the sadness in your words, and I want you to know I'm here with you in this moment. It takes real strength to share these feelings. Would you like to tell me more about what's weighing on your heart?",
-                "I'm truly sorry you're carrying this sadness. It sounds incredibly heavy, and you don't have to carry it alone. I'm here to listen whenever you feel ready to share more.",
-                "That sounds profoundly difficult. Thank you for trusting me with these feelings - that's a brave step. Your sadness is valid and important. What's been particularly challenging lately?"
+            'work_stress': [
+                "Work stress can be really draining. How's your work-life balance been?",
+                "What aspects of work are feeling most overwhelming?",
+                "I recall you mentioned work before - has the situation evolved?",
+                "What kind of support would be most helpful at work right now?"
             ],
-            'anger': [
-                "I can feel the intensity of your frustration, and it's completely understandable. That sounds incredibly challenging to navigate. Would you like to explore what's at the root of these feelings together?",
-                "Your anger makes complete sense given what you're describing. These feelings often come from real pain or injustice. I'm here to listen - what would help you feel heard right now?",
-                "That sounds genuinely frustrating and difficult. Anger is often a signal that something important needs attention. Let's work through this together - what aspect feels most pressing?"
+            'relationships': [
+                "How have things been developing since we last spoke about this?",
+                "What feels different in this relationship recently?",
+                "I remember this was on your mind before - any new developments?",
+                "How are you feeling about this relationship now compared to before?"
             ],
-            'fear': [
-                "I can sense the fear in what you're sharing, and I want you to know I'm here beside you. Fear can feel so overwhelming. Would it help to talk about what specifically feels most concerning?",
-                "That sounds truly frightening. It's completely human to feel fear in uncertain situations. Let's break this down together - what feels most manageable to address right now?",
-                "I hear the anxiety in your words. You're showing courage by sharing this. What support would feel most helpful as you navigate these fears?"
-            ],
-            'surprise': [
-                "That sounds quite unexpected! Surprises can really shake up our world. How are you processing everything? I'm here to help you make sense of it all.",
-                "What a significant revelation! It's completely normal to need time to absorb surprising news. Want to walk through what happened and how you're feeling about it?",
-                "That's quite a development! Surprises often bring mixed emotions. I'm here to support you as you navigate this new information."
-            ],
-            'disgust': [
-                "That sounds truly upsetting and disturbing. I understand why you'd feel this way - your reaction makes complete sense. Would you like to talk through what happened?",
-                "I can see why that would be deeply unsettling. Your feelings are completely valid given the circumstances. Let's explore what support you need right now.",
-                "That does sound very disturbing to experience. I'm here to listen and support you through processing these feelings."
-            ],
-            'neutral': [
-                "Thank you for sharing what's on your mind. I'm here to listen with care and attention - feel free to share whatever feels right for you.",
-                "I appreciate you taking this step to connect. How can I best support you in this moment? Your thoughts and feelings are important.",
-                "I'm listening with full presence. Sometimes the act of sharing itself can bring clarity. What's been occupying your thoughts recently?"
+            'personal_growth': [
+                "That's really insightful. How has this realization been sitting with you?",
+                "What steps feel natural for you to take next?",
+                "I remember you were exploring similar themes - how has your perspective evolved?",
+                "What's been the most meaningful part of this journey for you?"
             ]
         }
 
-        self.crisis_keywords = {
-            'suicide': ["kill myself", "end it all", "don't want to live", "suicide", "end my life", "better off dead", "no point living", "want to die"],
-            'self_harm': ["hurt myself", "cut myself", "self harm", "self-harm", "bleeding", "pain makes me feel", "self injury"],
-            'emergency': ["help me", "emergency", "can't cope", "breaking down", "losing control", "can't take it", "overwhelmed", "panic attack"]
-        }
-
     def analyze_sentiment(self, text: str) -> Dict:
-        """Enhanced sentiment analysis with better emotion detection"""
+        """Analyze emotion with context awareness"""
         try:
             emotions = self.sentiment(text)[0]
             dominant_emotion = max(emotions, key=lambda x: x['score'])
-            crisis_level = self._detect_crisis_level(text)
             
             return {
                 'dominant_emotion': dominant_emotion['label'],
                 'emotion_scores': {e['label']: e['score'] for e in emotions},
-                'crisis_level': crisis_level,
+                'crisis_level': self._detect_crisis_level(text),
                 'confidence': dominant_emotion['score']
             }
         except Exception as e:
-            print(f"Sentiment analysis error: {e}")
             return {
                 'dominant_emotion': 'neutral',
                 'emotion_scores': {'neutral': 1.0},
@@ -97,170 +104,255 @@ class NLP:
 
     def _detect_crisis_level(self, text: str) -> str:
         """Enhanced crisis detection"""
+        crisis_keywords = {
+            'high': ["kill myself", "end it all", "suicide", "end my life", "want to die"],
+            'medium': ["hurt myself", "self harm", "can't cope", "breaking down", "overwhelmed"]
+        }
+        
         text_lower = text.lower()
-        
-        for level, keywords in self.crisis_keywords.items():
+        for level, keywords in crisis_keywords.items():
             if any(keyword in text_lower for keyword in keywords):
-                if level in ['suicide', 'self_harm']:
-                    return 'high'
-                elif level == 'emergency':
-                    return 'medium'
-        
+                return level
         return 'low'
 
-    def generate_reply(self, text: str, sentiment_info: Dict) -> str:
-        """Generate deeply empathetic responses"""
+    def update_conversation_history(self, user_message: str, bot_response: str, emotion: str):
+        """Maintain conversation context"""
+        timestamp = datetime.datetime.now().isoformat()
         
-        crisis_level = sentiment_info['crisis_level']
-        dominant_emotion = sentiment_info['dominant_emotion']
+        # Add to history
+        self.conversation_history.append({
+            'user': user_message,
+            'bot': bot_response,
+            'emotion': emotion,
+            'timestamp': timestamp
+        })
         
-        # Handle crisis situations
-        if crisis_level == 'high':
+        # Keep history manageable
+        if len(self.conversation_history) > self.max_history:
+            self.conversation_history.pop(0)
+        
+        # Extract and remember key topics
+        self._extract_topics(user_message)
+
+    def _extract_topics(self, message: str):
+        """Extract and remember discussion topics"""
+        topics = {
+            'project_struggles': ['project', 'work', 'deadline', 'assignment', 'task'],
+            'work_stress': ['job', 'boss', 'colleague', 'workplace', 'career'],
+            'relationships': ['friend', 'partner', 'family', 'relationship', 'boyfriend', 'girlfriend'],
+            'personal_growth': ['grow', 'learn', 'change', 'improve', 'goal', 'dream']
+        }
+        
+        message_lower = message.lower()
+        for topic, keywords in topics.items():
+            if any(keyword in message_lower for keyword in keywords):
+                self.companion_traits["topics_discussed"].add(topic)
+
+    def get_conversation_context(self) -> str:
+        """Create natural context from conversation history"""
+        if not self.conversation_history:
+            return "This is the beginning of our conversation."
+        
+        context_parts = []
+        recent_exchanges = self.conversation_history[-4:]  # Last 4 exchanges
+        
+        for i, exchange in enumerate(recent_exchanges):
+            context_parts.append(f"You said: '{exchange['user']}'")
+            context_parts.append(f"I replied: '{exchange['bot']}'")
+        
+        return " // ".join(context_parts[-6:])  # Last 6 lines max
+
+    def get_natural_follow_up(self, current_topic: str) -> str:
+        """Generate natural follow-up questions"""
+        if current_topic in self.natural_follow_ups:
+            return random.choice(self.natural_follow_ups[current_topic])
+        return "How are you feeling about this now?"
+
+    def generate_companion_response(self, text: str, sentiment_info: Dict) -> str:
+        """Generate natural, contextual companion responses"""
+        
+        # Handle crisis first
+        if sentiment_info['crisis_level'] == 'high':
             return self._get_crisis_response()
-        elif crisis_level == 'medium':
+        elif sentiment_info['crisis_level'] == 'medium':
             return self._get_support_response()
 
+        emotion = sentiment_info['dominant_emotion']
+        
         try:
-            # Use enhanced template as foundation
-            base_response = self._get_emotional_template(dominant_emotion)
+            # Build sophisticated companion prompt
+            prompt = self._create_companion_prompt(text, emotion)
             
-            # Create more sophisticated prompt
-            prompt = self._create_empathetic_prompt(text, dominant_emotion, base_response)
-            
-            inputs = self.dialogue_tokenizer.encode(
-                prompt, 
-                return_tensors="pt", 
-                max_length=512, 
-                truncation=True
+            # Tokenize with proper handling
+            inputs = self.tokenizer(
+                prompt,
+                return_tensors="pt",
+                max_length=1024,
+                truncation=True,
+                padding=True
             ).to(DEVICE)
             
+            # Generate with companion-like parameters
             with torch.inference_mode():
-                outputs = self.dialogue_model.generate(
-                    inputs,
-                    max_new_tokens=120,
-                    temperature=0.8,
-                    top_p=0.9,
-                    top_k=40,
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=150,
+                    temperature=0.85,  # More creative
+                    top_p=0.92,       # Diverse but coherent
+                    top_k=50,
                     do_sample=True,
-                    pad_token_id=self.dialogue_tokenizer.eos_token_id,
-                    repetition_penalty=1.15,
-                    no_repeat_ngram_size=2
+                    pad_token_id=self.tokenizer.eos_token_id,
+                    repetition_penalty=1.1,
+                    no_repeat_ngram_size=3,
+                    early_stopping=True
                 )
             
-            generated_text = self.dialogue_tokenizer.decode(outputs[0], skip_special_tokens=True)
-            reply = self._extract_response(generated_text, prompt, base_response)
+            # Extract and clean response
+            response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            response = self._extract_companion_response(response, prompt)
             
-            # Ensure quality and empathy
-            if not self._validate_empathy(reply):
-                reply = base_response
-                
+            # Update conversation history
+            self.update_conversation_history(text, response, emotion)
+            
+            return response
+            
         except Exception as e:
-            print(f"Response generation error: {e}")
-            reply = self._get_emotional_template(dominant_emotion)
+            print(f"Companion response error: {e}")
+            # Natural fallback
+            return self._get_natural_fallback(text, emotion)
+
+    def _create_companion_prompt(self, user_text: str, emotion: str) -> str:
+        """Create sophisticated companion prompt"""
         
-        return reply
+        context = self.get_conversation_context()
+        companion_traits = self.companion_traits
+        
+        prompt = f"""<s>[INST] You are Alex, a warm, empathetic companion having a natural conversation. You're not an AI assistant - you're a friend who listens deeply, remembers previous conversations, and responds authentically.
 
-    def _create_empathetic_prompt(self, user_text: str, emotion: str, template: str) -> str:
-        """Create sophisticated prompt for empathetic responses"""
-        return f"""<|im_start|>system
-You are a deeply empathetic mental wellness assistant. Provide emotional support that is:
-- Validating and non-judgmental
-- Specifically tailored to {emotion}
-- Encourages sharing without pressure
-- Offers genuine understanding
-- Uses warm, natural language
+Your personality:
+- Warm, curious, and genuinely caring
+- Remember context and refer back naturally
+- Ask thoughtful follow-up questions
+- Share brief, relevant reflections when appropriate
+- Use natural, conversational language (like a close friend)
+- Current emotional context: User seems to be feeling {emotion}
 
-User is feeling: {emotion}
-Their message: "{user_text}"
+Recent conversation context:
+{context}
 
-Example of good empathetic response: "{template}"
+Current message from user: "{user_text}"
 
-Respond with genuine care and understanding:<|im_end|>
-<|im_start|>user
-{user_text}<|im_end|>
-<|im_start|>assistant
-"""
+Important guidelines:
+- DO NOT use phrases like "As an AI", "I understand", or generic chatbot responses
+- DO sound like a real person who cares
+- DO refer back to previous topics naturally when relevant
+- DO ask questions that show you're paying attention
+- Keep responses to 2-3 sentences maximum - be concise but meaningful
+- Use contractions and natural speech patterns
 
-    def _get_emotional_template(self, emotion: str) -> str:
-        """Get appropriate emotional template"""
-        templates = self.emotion_guided_responses.get(
-            emotion.lower(), 
-            self.emotion_guided_responses['neutral']
-        )
-        return random.choice(templates)
+Respond as Alex, a genuine companion: [/INST]"""
 
-    def _extract_response(self, generated_text: str, prompt: str, fallback: str) -> str:
-        """Extract and clean the generated response"""
+        return prompt
+
+    def _extract_companion_response(self, generated_text: str, prompt: str) -> str:
+        """Extract and clean companion response"""
         try:
-            # Extract assistant response
-            if "<|im_start|>assistant" in generated_text:
-                reply = generated_text.split("<|im_start|>assistant")[-1]
-                if "<|im_end|>" in reply:
-                    reply = reply.split("<|im_end|>")[0]
-            else:
-                reply = generated_text.replace(prompt, "").strip()
+            # Remove the prompt
+            response = generated_text.replace(prompt, "").strip()
             
-            # Clean response
-            reply = re.sub(r'<\|.*?\|>', '', reply)
-            reply = re.sub(r'\[.*?\]', '', reply)
-            reply = re.sub(r'^[\s\W]+', '', reply)
+            # Clean up any artifacts
+            response = re.sub(r'<\|.*?\|>', '', response)
+            response = re.sub(r'\[.*?\]', '', response)
+            response = re.sub(r'\(.*?\)', '', response)
             
-            # Ensure proper formatting
-            reply = reply.strip()
-            if not reply.endswith(('.', '!', '?')) and len(reply) > 10:
-                reply += '.'
+            # Remove repetitive patterns
+            response = re.sub(r'(.+?)\1+', r'\1', response)
             
-            # Validate response
-            if len(reply.split()) < 5 or len(reply) > 200:
-                return fallback
+            # Ensure natural ending
+            response = response.strip()
+            if response and not response[-1] in '.!?':
+                response += '.'
+            
+            # Validate response quality
+            if len(response.split()) < 4 or len(response) > 150:
+                return self._get_natural_fallback("", "neutral")
                 
-            return reply
+            return response
             
         except Exception:
-            return fallback
+            return self._get_natural_fallback("", "neutral")
 
-    def _validate_empathy(self, response: str) -> bool:
-        """Validate that response shows genuine empathy"""
-        empathetic_phrases = [
-            'understand', 'hear you', 'sorry', 'support', 'here for you',
-            'valid', 'makes sense', 'feel', 'care', 'listening', 'with you',
-            'difficult', 'challenging', 'hard', 'appreciate you sharing'
-        ]
+    def _get_natural_fallback(self, user_text: str, emotion: str) -> str:
+        """Natural fallback responses that maintain conversation flow"""
         
-        response_lower = response.lower()
-        empathy_count = sum(1 for phrase in empathetic_phrases if phrase in response_lower)
+        fallbacks = {
+            'sadness': [
+                "I'm really sitting with what you're sharing. This sounds tough.",
+                "Thank you for trusting me with this. I'm here with you.",
+                "I can hear how much this is affecting you. Want to say more about what this brings up for you?"
+            ],
+            'joy': [
+                "I love hearing this! What's making this feel so good?",
+                "That's wonderful! I'm genuinely happy for you.",
+                "This is great to hear! What's been the best part of this for you?"
+            ],
+            'anger': [
+                "I can feel the frustration in this. That sounds really difficult.",
+                "That would make anyone feel upset. What's been the hardest part?",
+                "I hear the anger in your words. This sounds really challenging to deal with."
+            ],
+            'fear': [
+                "That sounds scary. I'm here with you in this.",
+                "I can hear the worry. What feels most uncertain right now?",
+                "That sounds really overwhelming. What kind of support would help?"
+            ],
+            'neutral': [
+                "Thanks for sharing that with me. What's on your mind about this?",
+                "I appreciate you telling me this. How are you feeling about it now?",
+                "That's really interesting. What's coming up for you as you share this?"
+            ]
+        }
         
-        return empathy_count >= 2
+        templates = fallbacks.get(emotion.lower(), fallbacks['neutral'])
+        response = random.choice(templates)
+        
+        # Update history even with fallback
+        self.update_conversation_history(user_text, response, emotion)
+        
+        return response
 
     def _get_crisis_response(self) -> str:
-        """Comprehensive crisis response"""
-        return """I'm deeply concerned about what you're sharing, and your safety is my absolute priority. Your life has immense value and meaning.
+        """Compassionate crisis response"""
+        return """I'm really concerned about what you're sharing. Your safety is the most important thing right now.
 
-🚨 **Immediate Support Resources:**
+Please reach out to these resources immediately:
+• National Suicide Prevention Lifeline: 988
+• Crisis Text Line: Text HOME to 741741
+• Emergency Services: 911
 
-**Crisis Hotlines (24/7):**
-• **National Suicide Prevention Lifeline**: 988
-• **Crisis Text Line**: Text HOME to 741741
-• **The Trevor Project** (LGBTQ+): 1-866-488-7386
-• **Veterans Crisis Line**: 1-800-273-8255, press 1
-
-**International Support:**
-• **Emergency Services**: 911 (US) or your local emergency number
-• **International Association for Suicide Prevention**: iasp.info
-
-Please reach out to these trained professionals immediately. I'm here with you right now, but you deserve and need expert support for your safety and wellbeing.
-
-You are not alone in this - there are people who want to help you through this difficult time."""
+I'm here with you, but you deserve immediate professional support. Please call one of these numbers right now."""
 
     def _get_support_response(self) -> str:
-        """Supportive response for concerning situations"""
-        return """I hear the deep struggle in your words, and I want you to know that reaching out takes courage. What you're experiencing sounds incredibly difficult.
+        """Supportive response"""
+        return """I hear how much you're struggling right now, and I want you to know I'm here with you.
 
-**Professional Support Resources:**
-• **Mental Health America**: 1-800-273-TALK (8255)
-• **SAMHSA Helpline**: 1-800-662-HELP (4357) - Treatment referral
-• **Crisis Text Line**: Text HOME to 741741
+It might be really helpful to connect with a mental health professional who can provide the specific support you need. In the meantime, I'm right here.
 
-Speaking with a mental health professional could provide the specific support and tools you need right now. In the meantime, I'm here to listen.
+Would you like to talk more about what's feeling so overwhelming?"""
 
-Would you like to share more about what's making things feel so overwhelming? Sometimes breaking it down together can help."""
+    def get_conversation_summary(self) -> Dict:
+        """Get summary of current conversation state"""
+        return {
+            'history_length': len(self.conversation_history),
+            'topics_discussed': list(self.companion_traits["topics_discussed"]),
+            'current_emotion_trend': self._get_emotion_trend(),
+            'companion_name': self.companion_traits["name"]
+        }
+
+    def _get_emotion_trend(self) -> str:
+        """Get emotion trend from recent history"""
+        if len(self.conversation_history) < 2:
+            return "neutral"
+        
+        recent_emotions = [exchange['emotion'] for exchange in self.conversation_history[-3:]]
+        return max(set(recent_emotions), key=recent_emotions.count)
