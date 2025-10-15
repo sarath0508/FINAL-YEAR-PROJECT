@@ -1,0 +1,4 @@
+{
+  "IN": {"country": "India", "emergency": "112", "suicide_hotline": "9152987821"},
+  "US": {"country": "United States", "emergency": "911", "suicide_hotline": "988"}
+}
