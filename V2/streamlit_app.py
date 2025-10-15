@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Beautiful custom CSS
+# Custom CSS
 st.markdown("""
 <style>
     .companion-header {
@@ -38,7 +38,6 @@ st.markdown("""
         margin: 10px 0 10px 15%;
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
         line-height: 1.5;
-        position: relative;
     }
     .message-companion {
         background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
@@ -55,44 +54,12 @@ st.markdown("""
         opacity: 0.7;
         margin-top: 5px;
     }
-    .stTextArea textarea {
-        border-radius: 15px;
-        border: 2px solid #e0e0e0;
-        padding: 15px;
-        font-size: 1rem;
-        transition: all 0.3s ease;
-    }
-    .stTextArea textarea:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
-    }
-    .companion-button {
-        border-radius: 12px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 12px 28px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    .companion-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.3);
-    }
     .conversation-stats {
         background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
         color: white;
         padding: 15px;
         border-radius: 12px;
         margin: 10px 0;
-    }
-    .typing-indicator {
-        display: inline-block;
-        padding: 10px 15px;
-        background: #f0f0f0;
-        border-radius: 15px;
-        color: #666;
-        font-style: italic;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -104,7 +71,7 @@ def load_companion():
 
 companion = load_companion()
 
-# Session state for conversation
+# Session state initialization
 if "conversation" not in st.session_state:
     st.session_state.conversation = []
 if "emotional_state" not in st.session_state:
@@ -114,8 +81,10 @@ if "emotional_state" not in st.session_state:
         'crisis_level': 'low',
         'confidence': 0
     }
-if "waiting_for_response" not in st.session_state:
-    st.session_state.waiting_for_response = False
+if "processing" not in st.session_state:
+    st.session_state.processing = False
+if "show_stats" not in st.session_state:
+    st.session_state.show_stats = False
 
 # Header
 st.markdown('<h1 class="companion-header">Mindful Companion</h1>', unsafe_allow_html=True)
@@ -125,12 +94,12 @@ st.markdown('<p class="companion-subtitle">Your AI friend who listens, remembers
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.markdown("### 💫 Your Conversation with ChatBot")
+    st.markdown("### 💫 Your Conversation")
     
     # Conversation display
     chat_container = st.container()
     with chat_container:
-        for i, msg in enumerate(st.session_state.conversation):
+        for msg in st.session_state.conversation:
             if msg["role"] == "user":
                 st.markdown(
                     f'<div class="message-user">'
@@ -140,7 +109,6 @@ with col1:
                     unsafe_allow_html=True
                 )
             else:
-                emotion = msg.get('emotion', 'neutral')
                 st.markdown(
                     f'<div class="message-companion">'
                     f'<div><strong>Bot:</strong> {msg["text"]}</div>'
@@ -148,38 +116,117 @@ with col1:
                     f'</div>', 
                     unsafe_allow_html=True
                 )
-        
-        # Typing indicator
-        if st.session_state.waiting_for_response:
-            st.markdown(
-                '<div class="typing-indicator">Bot is thinking...</div>',
-                unsafe_allow_html=True
-            )
 
     # User input
     st.markdown("### 💭 Share what's on your mind")
-    user_input = st.text_area(
-        "What would you like to talk about?",
-        placeholder="Hey Bot, I've been thinking about...\n\nI'm feeling... because...\n\nRemember when we talked about...",
-        height=100,
-        key="user_input",
-        label_visibility="collapsed"
-    )
-
-    # Action buttons
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
-    with col_btn1:
-        send_btn = st.button("💫 Send to Bot", use_container_width=True, type="primary")
-    with col_btn2:
-        clear_btn = st.button("🔄 Fresh Start", use_container_width=True)
-    with col_btn3:
+    
+    # Use form to prevent auto-rerun issues
+    with st.form(key="chat_form", clear_on_submit=True):
+        user_input = st.text_area(
+            "What would you like to talk about?",
+            placeholder="Hey Bot, I've been thinking about...",
+            height=100,
+            key="user_input_field",
+            label_visibility="collapsed"
+        )
+        
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+        with col_btn1:
+            submit = st.form_submit_button("💫 Send to Bot", use_container_width=True, type="primary")
+        with col_btn2:
+            # Can't have regular buttons in forms, moved outside
+            pass
+        with col_btn3:
+            pass
+    
+    # Buttons outside form
+    col_act1, col_act2, col_act3 = st.columns([1, 1, 1])
+    with col_act1:
+        pass  # Submit button is in form
+    with col_act2:
+        if st.button("🔄 Fresh Start", use_container_width=True):
+            st.session_state.conversation = []
+            st.session_state.emotional_state = {
+                'dominant_emotion': 'neutral',
+                'emotion_scores': {},
+                'crisis_level': 'low',
+                'confidence': 0
+            }
+            st.rerun()
+    with col_act3:
         if st.button("📊 Conversation Stats", use_container_width=True):
-            st.session_state.show_stats = not st.session_state.get('show_stats', False)
+            st.session_state.show_stats = not st.session_state.show_stats
+            st.rerun()
+    
+    # Process submission
+    if submit and user_input and user_input.strip():
+        text = user_input.strip()
+        current_time = datetime.datetime.now().strftime("%H:%M")
+        
+        # Add user message
+        st.session_state.conversation.append({
+            "role": "user", 
+            "text": text,
+            "time": current_time
+        })
+        
+        # Generate response immediately
+        with st.spinner("💫 Bot is thinking..."):
+            try:
+                # Analyze sentiment
+                sentiment_info = companion.analyze_sentiment(text)
+                st.session_state.emotional_state = sentiment_info
+                
+                # Generate response
+                response = companion.generate_companion_response(text, sentiment_info)
+                
+                # Add bot response
+                st.session_state.conversation.append({
+                    "role": "companion", 
+                    "text": response,
+                    "emotion": sentiment_info['dominant_emotion'],
+                    "time": datetime.datetime.now().strftime("%H:%M")
+                })
+                
+                # Show insight
+                emotion_emoji = {
+                    'joy': '😊', 'sadness': '😢', 'anger': '😠', 
+                    'fear': '😨', 'surprise': '😲', 'neutral': '🤗'
+                }.get(sentiment_info['dominant_emotion'].lower(), '🤗')
+                
+                st.success(f"{emotion_emoji} **Bot noticed**: You seem to be feeling **{sentiment_info['dominant_emotion'].title()}**")
+                
+                # Crisis warnings
+                if sentiment_info['crisis_level'] == 'high':
+                    st.error("""
+                    🚨 **Immediate Support Needed**
+                    Your safety is the most important thing. Please contact:
+                    • **988** Suicide Prevention Lifeline
+                    • **911** Emergency Services
+                    • Text **HOME** to **741741**
+                    """)
+                elif sentiment_info['crisis_level'] == 'medium':
+                    st.warning("""
+                    ⚠️ **Additional Support Available**
+                    Consider reaching out to a mental health professional for comprehensive support.
+                    """)
+                
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+                # Add fallback response
+                st.session_state.conversation.append({
+                    "role": "companion",
+                    "text": "I'm here with you. Could you tell me more about what's on your mind?",
+                    "emotion": "neutral",
+                    "time": datetime.datetime.now().strftime("%H:%M")
+                })
+        
+        st.rerun()
 
 with col2:
     st.markdown("### 🎭 Bot's Reactions")
     
-    # Avatar and emotional indicator
+    # Avatar
     if st.session_state.emotional_state:
         render_dot_avatar(st.session_state.emotional_state)
         render_emotional_indicator(st.session_state.emotional_state)
@@ -201,93 +248,21 @@ with col2:
         """, unsafe_allow_html=True)
         
         if summary['topics_discussed']:
-            st.markdown("**Topics we've discussed:**")
+            st.markdown("**Topics discussed:**")
             for topic in summary['topics_discussed']:
                 st.caption(f"• {topic.replace('_', ' ').title()}")
     
     st.markdown("---")
-    st.markdown("### 💡 Tips for Great Conversations")
+    st.markdown("### 💡 Tips")
     st.info("""
-    - **Be yourself** - Bot is here to listen, not judge
-    - **Reference past chats** - "Remember when we talked about..."
-    - **Share feelings** - "I felt... when..."
-    - **Ask questions** - Bot loves meaningful conversations
-    - **Take your time** - There's no rush
+    - **Be yourself** - Bot is here to listen
+    - **Share feelings** - "I felt..."
+    - **Ask questions** - Bot loves conversations
+    - **Take your time** - No rush
     """)
 
-# Handle interactions
-if clear_btn:
-    st.session_state.conversation = []
-    st.session_state.emotional_state = {
-        'dominant_emotion': 'neutral',
-        'emotion_scores': {},
-        'crisis_level': 'low',
-        'confidence': 0
-    }
-    st.session_state.waiting_for_response = False
-    st.rerun()
-
-if send_btn and user_input.strip():
-    text = user_input.strip()
-    current_time = datetime.datetime.now().strftime("%H:%M")
-    
-    # Add user message to conversation
-    st.session_state.conversation.append({
-        "role": "user", 
-        "text": text,
-        "time": current_time
-    })
-    
-    st.session_state.waiting_for_response = True
-    st.rerun()
-    
-    # Generate companion response
-    with st.spinner("💫 Bot is thinking deeply..."):
-        # Analyze emotional context
-        sentiment_info = companion.analyze_sentiment(text)
-        st.session_state.emotional_state = sentiment_info
-        
-        # Generate contextual companion response
-        response = companion.generate_companion_response(text, sentiment_info)
-    
-    # Add companion response to conversation
-    st.session_state.conversation.append({
-        "role": "companion", 
-        "text": response,
-        "emotion": sentiment_info['dominant_emotion'],
-        "time": datetime.datetime.now().strftime("%H:%M")
-    })
-    
-    st.session_state.waiting_for_response = False
-    
-    # Show emotional insight
-    emotion_emoji = {
-        'joy': '😊', 'sadness': '😢', 'anger': '😠', 
-        'fear': '😨', 'surprise': '😲', 'neutral': '🤗'
-    }.get(sentiment_info['dominant_emotion'].lower(), '🤗')
-    
-    st.success(f"{emotion_emoji} **Bot noticed**: You seem to be feeling **{sentiment_info['dominant_emotion'].title()}**")
-    
-    # Handle crisis situations
-    if sentiment_info['crisis_level'] == 'high':
-        st.error("""
-        🚨 **Immediate Support Needed**
-        Your safety is the most important thing. Please contact:
-        • **988** Suicide Prevention Lifeline
-        • **911** Emergency Services
-        • Text **HOME** to **741741**
-        """)
-    elif sentiment_info['crisis_level'] == 'medium':
-        st.warning("""
-        ⚠️ **Additional Support Available**
-        Consider reaching out to a mental health professional for comprehensive support.
-        You deserve expert care during difficult times.
-        """)
-    
-    st.rerun()
-
-# Show conversation statistics
-if st.session_state.get('show_stats', False) and st.session_state.conversation:
+# Show stats
+if st.session_state.show_stats and st.session_state.conversation:
     st.markdown("---")
     st.markdown("### 📈 Conversation Analytics")
     
@@ -295,18 +270,17 @@ if st.session_state.get('show_stats', False) and st.session_state.conversation:
     col_stat1, col_stat2, col_stat3 = st.columns(3)
     
     with col_stat1:
-        st.metric("Conversation Length", f"{summary['history_length']} exchanges")
+        st.metric("Exchanges", summary['history_length'])
     with col_stat2:
-        st.metric("Topics Discussed", len(summary['topics_discussed']))
+        st.metric("Topics", len(summary['topics_discussed']))
     with col_stat3:
-        st.metric("Current Mood", summary['current_emotion_trend'].title())
+        st.metric("Mood", summary['current_emotion_trend'].title())
 
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 20px;">
     <p><strong>💫 Mindful Companion</strong> - Your AI friend who genuinely cares</p>
-    <p><small>Bot is designed to be a supportive companion, not a replacement for professional mental health care. 
-    In crisis situations, please contact qualified professionals immediately.</small></p>
+    <p><small>Not a replacement for professional mental health care.</small></p>
 </div>
 """, unsafe_allow_html=True)
